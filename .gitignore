@@ -1,0 +1,26 @@
+*.obj
+*.mod
+*.pdb
+*.exe
+*.ilk
+*.exp
+*.lib
+*.idb
+*.pch
+*.ipch
+*.sdf
+*.opensdf
+*.log
+*.u2d
+*_genmod.f90
+Mixed Flow.txt
+Pressurized.txt
+interface_debug.dat
+AirPocket_Debug.txt
+run_stdout.txt
+run_stderr.txt
+*_run/
+fast_run/
+rtry_run/
+x64/
+.vs/
