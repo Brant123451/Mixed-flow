@@ -26,6 +26,10 @@ read(1,*) Initial_inflow_charge,flow_depth
 
 read(1,"(A256)") DATALN
 read(1,"(A256)") DATALN
+read(1,*) AirPocketLength0,VentHoleRatio
+
+read(1,"(A256)") DATALN
+read(1,"(A256)") DATALN
 read(1,*) Left_boundary,Right_boundary
 
 read(1,"(A256)") DATALN

@@ -1,16 +1,18 @@
-Do i=0,int(7.9744/deltax),1
-	H(i)=0.06
+Do i=0,InitIfaceCell,1
+	H(i)=LeftPressHead
 	A(i)=Area(H(i))
 	Dens(i)=Density(H(i))
-	V(i)=0.18
+
+	V(i)=0.0d0
 	Q(i)=A(i)*V(i)
 	C(i)=Celerity(H(i))
 Enddo
-Do i=int(7.9744/deltax)+1,nc,1
-	H(i)=0.020
+Do i=InitIfaceCell+1,nc,1
+	H(i)=max(flow_depth,Tol1)
 	A(i)=Area(H(i))
 	Dens(i)=Density(H(i))
-	V(i)=0.40
+	V(i)=0.0d0
 	Q(i)=A(i)*V(i)
+
 	C(i)=Celerity(H(i))
 Enddo

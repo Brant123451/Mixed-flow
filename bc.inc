@@ -15,7 +15,7 @@ Else
 		Dens(0)=Dens(1)
 	Else
 		If(Left_boundary==3) then !'定水深'
-			H(0)=0.06
+			H(0)=LeftPressHead
 			A(0)=Area(H(0))
 			Q(0)=Q(1)
 			C(0)=Celerity(H(0))

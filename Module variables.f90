@@ -25,9 +25,13 @@ Module variables
     Integer::DiagStep=0,DiagIface=0
     Logical::NegTrackReady=.false.
     Logical::NegUseTrackedRightCharRuntime=.true.
-    Logical::EnableInterfaceDebugOutput=.false.
+    Logical::EnableInterfaceDebugOutput=.true.
     Logical::EnableNegativeShadowDiagnostics=.false.
     Logical::EnableRuntimeStepPrint=.false.
+    Real(8)::ShockT1Deltat=0.0d0
+    Real(8)::ShockT1Slope=0.0d0
+    Real(8)::ShockT1Manning=0.0d0
+    Real(8)::ShockT1Friction=0.0d0
     Integer::NegTrackStep=0,NegTrackIface=0
     Real(8)::NegTrackOm1=0.0d0,NegTrackQ1=0.0d0,NegTrackOm2=0.0d0,NegTrackQ2=0.0d0,NegTrackW=0.0d0
     Integer::NegTrackPreparedStep=0

@@ -79,55 +79,19 @@ Function Riemann_Interface(OmigaL,OmigaR,Qm_L,Qm_R) Result(UM)
     Enddo
 
 100 continue
-    HgasLocal=0.0d0
-    HasS1Seed=.false.
-    HasS2Seed=.false.
-    S1SeedNorm=-1.0d0
-    S2SeedNorm=-1.0d0
-    Mode2WRootHitCount=0
-    Mode2WNearestRoot=0.0d0
-    Mode2WNearestDelta=-1.0d0
+    HgasLocal=(Pg-P_ref)/(Dens_ref*g)
     Scale1=max(1.0d0,abs(APY(OmigaL)),abs(APY(OmigaR)))
     PositiveSolved=.false.
     NegativeSolved=.false.
-    UseShadowRightChar=.false.
-    ShadowRightCharState=0.0d0
     call PrepareNegativeTrackForStep()
-    if (EnableNegativeShadowDiagnostics) then
-        call WriteNegativeRootDiag(.true.,2,'M2ROOT')
-        call WriteNegativeTrackShadowDiag()
-        call WriteNegativeRightCharShadowDiag()
-        call WriteNegativeRightCharTryDiag()
-    endif
-    call GetTrackedRightChar(RuntimeCharState,RuntimeTrackU2,RuntimeTrackedReady,RuntimeTrackStatus)
-    if (NegUseTrackedRightCharRuntime .and. RuntimeTrackedReady) then
-        UseShadowRightChar=.true.
-        ShadowRightCharState=RuntimeCharState
-        call TryNegativeMode(.true.,2,'M2FAILT','M2SCANT',NegativeSolved,UM)
-        if (.not.NegativeSolved) then
-            call GetTrackedW(RuntimeWTrack,RuntimeWTrackedReady,RuntimeWTrackStatus)
-            if (RuntimeWTrackedReady) then
-                SavedWpre=Wpre
-                Wpre=RuntimeWTrack
-                call TryNegativeMode(.true.,2,'M2FAILTW','M2SCANTW',NegativeSolved,UM)
-                Wpre=SavedWpre
-            endif
-            if (.not.NegativeSolved) then
-                if (.not.EnableNegativeShadowDiagnostics) call WriteNegativeRootDiag(.true.,2,'M2ROOT')
-                UseShadowRightChar=.false.
-                ShadowRightCharState=0.0d0
-                call TryNegativeMode(.true.,2,'M2FAIL','M2SCAN',NegativeSolved,UM)
-            endif
-        endif
-    else
-        if (.not.EnableNegativeShadowDiagnostics) call WriteNegativeRootDiag(.true.,2,'M2ROOT')
-        call TryNegativeMode(.true.,2,'M2FAIL','M2SCAN',NegativeSolved,UM)
-    endif
+    call TryShockFittingT1(NegativeSolved,UM)
 
     if (.not.NegativeSolved) then
         UM(1)=OmigaL
         UM(2)=Qm_L
         int_m=(/OmigaL,Qm_L,OmigaR,Qm_R/)
+        w=Wpre
+        Inter_type=2
     else
         call UpdateNegativeTrackState()
     endif
@@ -135,6 +99,199 @@ Function Riemann_Interface(OmigaL,OmigaR,Qm_L,Qm_R) Result(UM)
     return
 
 contains
+
+    subroutine TryShockFittingT1(ModeSolved,UMMode)
+        Implicit none
+        Logical,Intent(out)::ModeSolved
+        Real(8),Intent(out)::UMMode(2)
+        Real(8)::X(4),R(4),J(4,4),DX(4),XT(4),RT(4)
+        Real(8)::HStep,LambdaLoc,ResNormLoc,WPredLoc
+        Real(8)::Om1Loc,U1Loc,Om2Loc,U2Loc,BestNorm
+        Integer::IterLoc,K,LSLoc
+        Logical::StateOK,TrialOK,AcceptLoc,SolveOK
+
+        ModeSolved=.false.
+        UMMode(1)=OmigaL
+        UMMode(2)=Qm_L
+        Inter_type=2
+        call GetShockT1Predictor(WPredLoc)
+        w=WPredLoc
+
+        X(1)=VL
+        X(2)=max(HL,y_ref+Tol1)
+        X(3)=VR
+        X(4)=min(max(HR,10.0d0*Tol1),y_ref-Tol1)
+        if (NegTrackReady) then
+            if (NegTrackOm1>0.0d0 .and. NegTrackOm2>0.0d0) then
+                X(1)=NegTrackQ1/NegTrackOm1
+                X(2)=max(Depth(NegTrackOm1),y_ref+Tol1)
+                X(3)=NegTrackQ2/NegTrackOm2
+                X(4)=min(max(Depth(NegTrackOm2),10.0d0*Tol1),y_ref-Tol1)
+            endif
+        endif
+
+        call EvaluateShockT1Residual(X,WPredLoc,R,Om1Loc,U1Loc,Om2Loc,U2Loc,StateOK)
+        if (.not.StateOK) then
+            X(1)=VL
+            X(2)=max(HL,y_ref+Tol1)
+            X(3)=VR
+            X(4)=min(max(0.5d0*y_ref,10.0d0*Tol1),y_ref-Tol1)
+            call EvaluateShockT1Residual(X,WPredLoc,R,Om1Loc,U1Loc,Om2Loc,U2Loc,StateOK)
+        endif
+        if (.not.StateOK) return
+
+        BestNorm=max(abs(R(1)),abs(R(2)),abs(R(3)),abs(R(4)))
+        do IterLoc=1,40
+            if (BestNorm<1.0d-8) exit
+            do K=1,4
+                XT=X
+                HStep=1.0d-7*max(1.0d0,abs(X(K)))
+                XT(K)=XT(K)+HStep
+                call EvaluateShockT1Residual(XT,WPredLoc,RT,Om1Loc,U1Loc,Om2Loc,U2Loc,TrialOK)
+                if (.not.TrialOK) then
+                    RT=R+1.0d6
+                endif
+                J(1,K)=(RT(1)-R(1))/HStep
+                J(2,K)=(RT(2)-R(2))/HStep
+                J(3,K)=(RT(3)-R(3))/HStep
+                J(4,K)=(RT(4)-R(4))/HStep
+            enddo
+
+            call SolveShockLinear4x4(J,-R,DX,SolveOK)
+            if (.not.SolveOK) return
+
+            AcceptLoc=.false.
+            LambdaLoc=1.0d0
+            do LSLoc=1,12
+                XT=X+LambdaLoc*DX
+                call EvaluateShockT1Residual(XT,WPredLoc,RT,Om1Loc,U1Loc,Om2Loc,U2Loc,TrialOK)
+                if (TrialOK) then
+                    ResNormLoc=max(abs(RT(1)),abs(RT(2)),abs(RT(3)),abs(RT(4)))
+                    if (ResNormLoc<BestNorm) then
+                        X=XT
+                        R=RT
+                        BestNorm=ResNormLoc
+                        AcceptLoc=.true.
+                        exit
+                    endif
+                endif
+                LambdaLoc=0.5d0*LambdaLoc
+            enddo
+            if (.not.AcceptLoc) return
+        enddo
+
+        call EvaluateShockT1Residual(X,WPredLoc,R,Om1Loc,U1Loc,Om2Loc,U2Loc,StateOK)
+        if (.not.StateOK) return
+        BestNorm=max(abs(R(1)),abs(R(2)),abs(R(3)),abs(R(4)))
+        if (BestNorm>=1.0d-5) return
+
+        ModeSolved=.true.
+        w=WPredLoc
+        int_m=(/Om1Loc,Om1Loc*U1Loc,Om2Loc,Om2Loc*U2Loc/)
+        UMMode(1)=Om2Loc
+        UMMode(2)=Om2Loc*U2Loc
+    end subroutine
+
+    subroutine GetShockT1Predictor(WPredLoc)
+        Implicit none
+        Real(8),Intent(out)::WPredLoc
+        Real(8)::ARight
+        Real(8),External::Area
+
+        ARight=Area(HR)
+        if (abs(A_ref-ARight)<=Tol1*max(1.0d0,A_ref)) then
+            WPredLoc=Wpre
+        else
+            WPredLoc=(A_ref*VL-ARight*VR)/(A_ref-ARight)
+            if (WPredLoc/=WPredLoc) WPredLoc=Wpre
+        endif
+    end subroutine
+
+    subroutine EvaluateShockT1Residual(X,WLoc,RLoc,Om1Loc,U1Loc,Om2Loc,U2Loc,StateOK)
+        Implicit none
+        Real(8),Intent(in)::X(4),WLoc
+        Real(8),Intent(out)::RLoc(4),Om1Loc,U1Loc,Om2Loc,U2Loc
+        Logical,Intent(out)::StateOK
+        Real(8)::ARight,CRight,RhydRight,SF1,SF2
+        Real(8),External::Area,Density,Celerity,Hydraulic,APY
+
+        StateOK=.false.
+        RLoc=0.0d0
+        Om1Loc=0.0d0
+        U1Loc=0.0d0
+        Om2Loc=0.0d0
+        U2Loc=0.0d0
+        if (X(1)/=X(1) .or. X(2)/=X(2) .or. X(3)/=X(3) .or. X(4)/=X(4)) return
+        if (X(2)<=y_ref+Tol1) return
+        if (X(4)<=Tol1 .or. X(4)>=y_ref-Tol1) return
+
+        ARight=Area(X(4))
+        CRight=Celerity(X(4))
+        RhydRight=Hydraulic(ARight)
+        if (ARight<=0.0d0 .or. CRight<=Tol1 .or. RhydRight<=Tol1) return
+
+        U1Loc=X(1)
+        U2Loc=X(3)
+        Om1Loc=Density(X(2))*A_ref
+        Om2Loc=Dens_ref*ARight
+        if (Om1Loc<=0.0d0 .or. Om2Loc<=0.0d0) return
+
+        SF1=ShockT1Manning**2*U2Loc*abs(U2Loc)/(RhydRight**1.33333d0)
+        SF2=ShockT1Friction*U1Loc*abs(U1Loc)/(2.0d0*D)
+        RLoc(1)=U1Loc-VL+g*(X(2)-HL)/C_Waterhammer+g*(ShockT1Slope-SF2)*ShockT1Deltat
+        RLoc(2)=U2Loc-VR-g*X(4)/CRight+g*HR/max(Celerity(HR),Tol1)+g*(ShockT1Slope-SF1)*ShockT1Deltat
+        RLoc(3)=A_ref*U1Loc-ARight*U2Loc-WLoc*(A_ref-ARight)
+        RLoc(4)=Om1Loc*(U1Loc-WLoc)**2+APY(Om1Loc)-Om2Loc*(U2Loc-WLoc)**2-APY(Om2Loc)-Dens_ref*g*A_ref*HgasLocal
+        if (RLoc(1)/=RLoc(1) .or. RLoc(2)/=RLoc(2) .or. RLoc(3)/=RLoc(3) .or. RLoc(4)/=RLoc(4)) return
+        StateOK=.true.
+    end subroutine
+
+    subroutine SolveShockLinear4x4(A,B,X,SolveOK)
+        Implicit none
+        Real(8),Intent(in)::A(4,4),B(4)
+        Real(8),Intent(out)::X(4)
+        Logical,Intent(out)::SolveOK
+        Real(8)::M(4,4),RHS(4),RowTmp(4),Fac,ValTmp
+        Integer::I,J,K,P
+
+        M=A
+        RHS=B
+        X=0.0d0
+        SolveOK=.true.
+        do K=1,3
+            P=K
+            do I=K+1,4
+                if (abs(M(I,K))>abs(M(P,K))) P=I
+            enddo
+            if (abs(M(P,K))<=1.0d-12) then
+                SolveOK=.false.
+                return
+            endif
+            if (P/=K) then
+                RowTmp=M(K,:)
+                M(K,:)=M(P,:)
+                M(P,:)=RowTmp
+                ValTmp=RHS(K)
+                RHS(K)=RHS(P)
+                RHS(P)=ValTmp
+            endif
+            do I=K+1,4
+                Fac=M(I,K)/M(K,K)
+                do J=K,4
+                    M(I,J)=M(I,J)-Fac*M(K,J)
+                enddo
+                RHS(I)=RHS(I)-Fac*RHS(K)
+            enddo
+        enddo
+        if (abs(M(4,4))<=1.0d-12) then
+            SolveOK=.false.
+            return
+        endif
+        X(4)=RHS(4)/M(4,4)
+        do I=3,1,-1
+            X(I)=(RHS(I)-sum(M(I,I+1:4)*X(I+1:4)))/M(I,I)
+        enddo
+    end subroutine
 
     subroutine SetNegativeModeControl(UseRightCharEqWanted,InterTypeWanted)
         Implicit none
